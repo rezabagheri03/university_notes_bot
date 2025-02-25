@@ -1,0 +1,121 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Upload Note - University Notes Admin{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0">Upload New Note</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    {{ form.hidden_tag() }}
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            {{ form.major.label(class="form-label") }}
+                            {{ form.major(class="form-select") }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.semester.label(class="form-label") }}
+                            {{ form.semester(class="form-select") }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            {{ form.lesson.label(class="form-label") }}
+                            {{ form.lesson(class="form-select") }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.teacher.label(class="form-label") }}
+                            {{ form.teacher(class="form-select") }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            {{ form.name.label(class="form-label") }}
+                            {{ form.name(class="form-control") }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.author.label(class="form-label") }}
+                            {{ form.author(class="form-control") }}
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            {{ form.date_written.label(class="form-label") }}
+                            {{ form.date_written(class="form-control", type="date") }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.file.label(class="form-label") }}
+                            {{ form.file(class="form-control") }}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.description.label(class="form-label") }}
+                        {{ form.description(class="form-control", rows=3) }}
+                    </div>
+
+                    <div class="text-end">
+                        <a href="{{ url_for('admin.dashboard') }}" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Upload Note</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const majorSelect = document.getElementById('major');
+    const semesterSelect = document.getElementById('semester');
+    const lessonSelect = document.getElementById('lesson');
+    const teacherSelect = document.getElementById('teacher');
+
+    majorSelect.addEventListener('change', function() {
+        updateSemesters(this.value);
+    });
+
+    semesterSelect.addEventListener('change', function() {
+        updateLessons(this.value);
+    });
+
+    lessonSelect.addEventListener('change', function() {
+        updateTeachers(this.value);
+    });
+
+    function updateSelect(url, select) {
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                select.innerHTML = '';
+                data.forEach(item => {
+                    const option = new Option(item.name, item.id);
+                    select.add(option);
+                });
+            });
+    }
+
+    function updateSemesters(majorId) {
+        updateSelect(`/admin/api/semesters/${majorId}`, semesterSelect);
+    }
+
+    function updateLessons(semesterId) {
+        updateSelect(`/admin/api/lessons/${semesterId}`, lessonSelect);
+    }
+
+    function updateTeachers(lessonId) {
+        updateSelect(`/admin/api/teachers/${lessonId}`, teacherSelect);
+    }
+});
+</script>
+{% endblock %} 

@@ -1,0 +1,67 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard - University Notes Admin{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Notes Dashboard</h2>
+    <a href="{{ url_for('admin.upload_note') }}" class="btn btn-primary">
+        Upload New Note
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Author</th>
+                        <th>Major</th>
+                        <th>Semester</th>
+                        <th>Lesson</th>
+                        <th>Teacher</th>
+                        <th>Date Written</th>
+                        <th>Rating</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for note in notes %}
+                    <tr>
+                        <td>{{ note.name }}</td>
+                        <td>{{ note.author }}</td>
+                        <td>{{ note.teacher.lesson.semester.major.name }}</td>
+                        <td>{{ note.teacher.lesson.semester.name }}</td>
+                        <td>{{ note.teacher.lesson.name }}</td>
+                        <td>{{ note.teacher.name }}</td>
+                        <td>{{ note.date_written.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ "%.1f"|format(note.average_rating) }}/5.0</td>
+                        <td>
+                            <div class="btn-group">
+                                <a href="{{ url_for('admin.edit_note', note_id=note.id) }}" 
+                                   class="btn btn-sm btn-outline-primary">Edit</a>
+                                <button type="button" 
+                                        class="btn btn-sm btn-outline-danger"
+                                        onclick="confirmDelete({{ note.id }})">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmDelete(noteId) {
+    if (confirm('Are you sure you want to delete this note?')) {
+        window.location.href = "{{ url_for('admin.delete_note', note_id=0) }}".replace('0', noteId);
+    }
+}
+</script>
+{% endblock %} 

@@ -1,0 +1,12 @@
+flask==2.3.3
+flask-sqlalchemy==3.1.1
+flask-login==0.6.2
+flask-wtf==1.2.1
+python-telegram-bot==20.4
+werkzeug==2.3.7
+SQLAlchemy==2.0.21
+python-dotenv==1.0.0
+nest-asyncio==1.5.8
+uvicorn==0.27.1
+asgiref==3.7.2
+jdatetime==4.1.1 
