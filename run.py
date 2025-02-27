@@ -37,10 +37,10 @@ async def run_telegram():
         logger.error("TELEGRAM_TOKEN not found in environment variables")
         return
 
-    # Build and configure the application
-    application = Application.builder().token(bot_token).build()
-    
     try:
+        # Build and configure the application without proxy
+        application = Application.builder().token(bot_token).build()
+        
         # Create handlers and add them to the application
         handlers = TelegramBotHandlers(app)
         for handler in handlers.get_handlers():
@@ -51,9 +51,16 @@ async def run_telegram():
         await application.initialize()
         await application.start()
         
-        # Start polling
+        # Start polling with increased timeouts
         logger.info("Starting polling...")
-        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await application.updater.start_polling(
+            allowed_updates=Update.ALL_TYPES,
+            timeout=30,
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30
+        )
         
         # Keep the application running
         stop_signal = asyncio.Event()
@@ -61,12 +68,16 @@ async def run_telegram():
         
     except Exception as e:
         logger.error(f"Bot error: {e}")
+        if "certificate verify failed" in str(e):
+            logger.error("SSL Certificate verification failed. Check your SSL certificates.")
+        elif "All connection attempts failed" in str(e):
+            logger.error("Could not connect to Telegram. Check your internet connection.")
     finally:
-        # Ensure proper cleanup
         try:
-            await application.updater.stop()
-            await application.stop()
-            await application.shutdown()
+            if 'application' in locals() and application.updater and application.updater.running:
+                await application.updater.stop()
+                await application.stop()
+                await application.shutdown()
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
 

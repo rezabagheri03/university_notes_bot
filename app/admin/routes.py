@@ -1,33 +1,35 @@
-from flask import Blueprint, render_template, redirect, url_for, flash, request, jsonify
+from flask import render_template, redirect, url_for, flash, request, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.utils import secure_filename
 from ..models.database import db, Admin, Note, Major, Semester, Lesson, Teacher, User, Subscription
 from .forms import LoginForm, NoteUploadForm
 import os
 from datetime import datetime
-import jdatetime
+# import jdatetime
 from config import Config
 import asyncio
 from telegram import Bot
 import nest_asyncio
+from . import bp
+import logging
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 # Apply nest_asyncio to allow nested event loops
 nest_asyncio.apply()
 
-admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
-
 def convert_persian_date(date_str):
     """Convert Persian date string to Gregorian datetime object."""
+    if not date_str or not date_str.strip():
+        return datetime.now().date()  # Return today's date as default
     try:
-        if not date_str:
-            return None
-        # Parse the Persian date string (expected format: YYYY/MM/DD)
-        year, month, day = map(int, date_str.split('/'))
-        persian_date = jdatetime.date(year, month, day)
-        return persian_date.togregorian()
+        # Parse the date string in YYYY/MM/DD format
+        year, month, day = map(int, date_str.strip().split('/'))
+        return datetime(year, month, day).date()
     except Exception as e:
         print(f"Error converting date: {e}")
-        return None
+        return datetime.now().date()  # Return today's date as fallback
 
 def sync_notify_subscribers(bot_token, note, lesson):
     """Synchronous wrapper for notification function."""
@@ -80,17 +82,17 @@ def sync_notify_subscribers(bot_token, note, lesson):
         except:
             pass
 
-@admin_bp.route('/')
-@admin_bp.route('/index')
+@bp.route('/')
+@bp.route('/index')
 @login_required
 def index():
     return redirect(url_for('admin.dashboard'))
 
-@admin_bp.route('/login', methods=['GET', 'POST'])
+@bp.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('admin.dashboard'))
-    
+
     form = LoginForm()
     if form.validate_on_submit():
         admin = Admin.query.filter_by(username=form.username.data).first()
@@ -101,13 +103,13 @@ def login():
         flash('نام کاربری یا رمز عبور نامعتبر است.', 'danger')
     return render_template('admin/login.html', form=form)
 
-@admin_bp.route('/dashboard')
+@bp.route('/dashboard')
 @login_required
 def dashboard():
     notes = Note.query.order_by(Note.upload_date.desc()).all()
     return render_template('admin/dashboard.html', notes=notes)
 
-@admin_bp.route('/edit_note/<int:note_id>', methods=['GET', 'POST'])
+@bp.route('/edit_note/<int:note_id>', methods=['GET', 'POST'])
 @login_required
 def edit_note(note_id):
     note = Note.query.get_or_404(note_id)
@@ -117,10 +119,9 @@ def edit_note(note_id):
         # Pre-fill form with existing note data
         form.name.data = note.name
         form.author.data = note.author
-        # Convert Gregorian date to Persian date for display
+        # Format date as YYYY/MM/DD
         if note.date_written:
-            persian_date = jdatetime.date.fromgregorian(date=note.date_written)
-            form.date_written.data = persian_date.strftime("%Y/%m/%d")
+            form.date_written.data = note.date_written.strftime("%Y/%m/%d")
         form.description.data = note.description
         form.major.data = note.teacher.lesson.semester.major.name
         form.semester.data = note.teacher.lesson.semester.name
@@ -185,7 +186,7 @@ def edit_note(note_id):
     
     return render_template('admin/upload_note.html', form=form, edit_mode=True)
 
-@admin_bp.route('/upload', methods=['GET', 'POST'])
+@bp.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_note():
     form = NoteUploadForm()
@@ -232,7 +233,7 @@ def upload_note():
                 teacher = Teacher(name=form.teacher.data, lesson_id=lesson.id)
                 db.session.add(teacher)
                 db.session.flush()
-            
+        
             # Save file
             file.save(file_path)
             
@@ -267,17 +268,17 @@ def upload_note():
         except Exception as e:
             db.session.rollback()
             flash(f'خطا در آپلود جزوه: {str(e)}', 'danger')
-    
+
     return render_template('admin/upload_note.html', form=form, edit_mode=False)
 
-@admin_bp.route('/logout')
+@bp.route('/logout')
 @login_required
 def logout():
     logout_user()
     flash('با موفقیت خارج شدید.', 'success')
     return redirect(url_for('admin.login'))
 
-@admin_bp.route('/delete_note/<int:note_id>', methods=['POST'])
+@bp.route('/delete_note/<int:note_id>', methods=['POST'])
 @login_required
 def delete_note(note_id):
     note = Note.query.get_or_404(note_id)
@@ -294,4 +295,62 @@ def delete_note(note_id):
         db.session.rollback()
         flash(f'خطا در حذف جزوه: {str(e)}', 'danger')
     
-    return redirect(url_for('admin.dashboard')) 
+    return redirect(url_for('admin.dashboard'))
+
+@bp.route('/users')
+@login_required
+def users():
+    users = User.query.order_by(User.id.desc()).all()
+    return render_template('admin/users.html', users=users)
+
+@bp.route('/send_message', methods=['POST'])
+@login_required
+def send_message():
+    try:
+        user_ids = request.form.getlist('user_ids[]')
+        message = request.form.get('message')
+        
+        if not message:
+            return jsonify({'success': False, 'error': 'پیام نمی‌تواند خالی باشد.'})
+        
+        bot_token = Config.TELEGRAM_TOKEN
+        if not bot_token:
+            return jsonify({'success': False, 'error': 'توکن تلگرام یافت نشد.'})
+
+        # Create new event loop for async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        async def send_messages():
+            bot = Bot(token=bot_token)
+            success_count = 0
+            failed_count = 0
+            
+            for user_id in user_ids:
+                user = User.query.get(user_id)
+                if user and user.telegram_id:
+                    try:
+                        await bot.send_message(
+                            chat_id=user.telegram_id,
+                            text=message,
+                            parse_mode='Markdown'
+                        )
+                        success_count += 1
+                    except Exception as e:
+                        logger.error(f"Error sending message to user {user.telegram_id}: {e}")
+                        failed_count += 1
+            
+            return success_count, failed_count
+
+        # Run the async function
+        success_count, failed_count = loop.run_until_complete(send_messages())
+        loop.close()
+        
+        return jsonify({
+            'success': True,
+            'message': f'پیام با موفقیت به {success_count} کاربر ارسال شد. {failed_count} ارسال ناموفق.'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in send_message: {e}")
+        return jsonify({'success': False, 'error': str(e)}) 

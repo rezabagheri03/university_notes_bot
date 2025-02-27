@@ -7,8 +7,34 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     telegram_id = db.Column(db.Integer, unique=True)
     username = db.Column(db.String(64))
+    join_date = db.Column(db.DateTime, default=datetime.utcnow)
+    last_active = db.Column(db.DateTime)
+    is_blocked = db.Column(db.Boolean, default=False)
+    block_reason = db.Column(db.Text)
+    notes_viewed = db.Column(db.Integer, default=0)
+    total_ratings = db.Column(db.Integer, default=0)
+    avg_rating = db.Column(db.Float, default=0.0)
     subscriptions = db.relationship('Subscription', backref='user', lazy='dynamic')
     ratings = db.relationship('Rating', backref='user', lazy='dynamic')
+
+    @property
+    def status(self):
+        if self.is_blocked:
+            return "blocked"
+        if self.last_active and (datetime.utcnow() - self.last_active).days < 7:
+            return "active"
+        return "inactive"
+
+    @property
+    def activity_stats(self):
+        return {
+            'notes_viewed': self.notes_viewed,
+            'total_ratings': self.total_ratings,
+            'avg_rating': round(self.avg_rating, 1) if self.avg_rating else 0,
+            'subscriptions': self.subscriptions.count(),
+            'days_since_join': (datetime.utcnow() - self.join_date).days if self.join_date else 0,
+            'days_since_active': (datetime.utcnow() - self.last_active).days if self.last_active else None
+        }
 
 class Admin(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)

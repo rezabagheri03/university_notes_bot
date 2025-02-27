@@ -1,6 +1,6 @@
 import os
 import logging
-import jdatetime
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     CallbackContext,
@@ -18,12 +18,11 @@ CHOOSING, MAJOR, SEMESTER, LESSON, TEACHER, NOTES, RATING = range(7)
 
 logger = logging.getLogger(__name__)
 
-def format_persian_date(date):
-    """Convert gregorian date to Persian date string."""
+def format_date(date):
+    """Format date as string."""
     if not date:
         return ""
-    persian_date = jdatetime.date.fromgregorian(date=date)
-    return persian_date.strftime("%Y/%m/%d")
+    return date.strftime("%Y/%m/%d")
 
 class TelegramBotHandlers:
     def __init__(self, app):
@@ -32,7 +31,10 @@ class TelegramBotHandlers:
     def get_handlers(self):
         """Return the conversation handler with all states and callbacks."""
         conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', self.start)],
+            entry_points=[
+                CommandHandler('start', self.start),
+                CallbackQueryHandler(self.start, pattern='^start$')
+            ],
             states={
                 CHOOSING: [
                     CallbackQueryHandler(self.browse_notes, pattern='^browse$'),
@@ -55,6 +57,7 @@ class TelegramBotHandlers:
                 ],
                 RATING: [
                     CallbackQueryHandler(self.handle_rating, pattern='^(rate_|back$)'),
+                    CallbackQueryHandler(self.start, pattern='^start$'),
                 ]
             },
             fallbacks=[
@@ -66,38 +69,62 @@ class TelegramBotHandlers:
         return [conv_handler]
 
     async def start(self, update: Update, context: CallbackContext) -> int:
-        """Start the conversation and ask user for input."""
+        """Start the conversation and display the main menu."""
         try:
-            if update.callback_query:
-                await update.callback_query.answer()
-                message = update.callback_query.message
-            else:
-                message = update.message
+            with self.app.app_context():
+                # Create or update user
+                user = User.query.filter_by(telegram_id=update.effective_user.id).first()
+                if not user:
+                    user = User(
+                        telegram_id=update.effective_user.id,
+                        username=update.effective_user.username,
+                        join_date=datetime.utcnow(),
+                        is_blocked=False,
+                        last_active=datetime.utcnow()
+                    )
+                    db.session.add(user)
+                else:
+                    user.last_active = datetime.utcnow()
+                    if user.username != update.effective_user.username:
+                        user.username = update.effective_user.username
+                db.session.commit()
 
-            if message and getattr(message, 'text', '').startswith('/start note_'):
-                note_id = int(message.text.split('_')[1])
-                await self.send_note(update, context, note_id)
-                return RATING
-            
-            keyboard = [
-                [InlineKeyboardButton("📚 مرور جزوه‌ها", callback_data='browse')],
-                [InlineKeyboardButton("ℹ️ درباره ربات", callback_data='about')]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            text = (
-                "🎓 به ربات جزوه‌های دانشگاهی خوش آمدید!\n\n"
-                "این ربات به شما کمک می‌کند تا جزوه‌های درسی را پیدا و به اشتراک بگذارید.\n\n"
-                "چه کاری می‌خواهید انجام دهید؟"
-            )
-            
-            if update.callback_query:
-                await message.edit_text(text, reply_markup=reply_markup)
-            else:
-                await message.reply_text(text, reply_markup=reply_markup)
-            
-            return CHOOSING
-            
+                # Check if user is blocked
+                if user.is_blocked:
+                    if update.message:
+                        await update.message.reply_text(
+                            "⛔️ شما از استفاده از ربات محدود شده‌اید. لطفاً با مدیر تماس بگیرید."
+                        )
+                    return ConversationHandler.END
+
+                # Handle note_id from deep linking
+                if context.args and context.args[0].startswith('note_'):
+                    try:
+                        note_id = int(context.args[0].split('_')[1])
+                        return await self.send_note(update, context, note_id)
+                    except (ValueError, IndexError):
+                        logger.error("Invalid note_id in deep link")
+                
+                keyboard = [
+                    [InlineKeyboardButton("📚 مرور جزوه‌ها", callback_data='browse')],
+                    [InlineKeyboardButton("ℹ️ درباره ربات", callback_data='about')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                text = (
+                    "🎓 به ربات جزوه‌های دانشگاهی خوش آمدید!\n\n"
+                    "این ربات به شما کمک می‌کند تا جزوه‌های درسی را پیدا و به اشتراک بگذارید.\n\n"
+                    "چه کاری می‌خواهید انجام دهید؟"
+                )
+                
+                if update.callback_query:
+                    await update.callback_query.answer()
+                    await update.callback_query.message.edit_text(text, reply_markup=reply_markup)
+                else:
+                    await update.message.reply_text(text, reply_markup=reply_markup)
+                
+                return CHOOSING
+
         except Exception as e:
             logger.error(f"Error in start handler: {e}")
             try:
@@ -196,9 +223,6 @@ class TelegramBotHandlers:
                 return await self.handle_semester(update, context)
             return await self.browse_notes(update, context)
 
-        if query.data.startswith(('subscribe_', 'unsubscribe_')):
-            return await self.handle_subscription(update, context)
-
         lesson_id = int(query.data.split('_')[1])
         context.user_data['lesson_id'] = lesson_id
 
@@ -271,7 +295,7 @@ class TelegramBotHandlers:
                 overview += (
                     f"📝 *{note.name}*\n"
                     f"نویسنده: {note.author}\n"
-                    f"تاریخ: {format_persian_date(note.date_written)}\n"
+                    f"تاریخ: {format_date(note.date_written)}\n"
                     f"امتیاز: {note.average_rating:.1f}⭐ ({note.rating_count} رأی)\n"
                     f"[📥 دانلود جزوه](https://t.me/{context.bot.username}?start=note_{note.id})\n\n"
                 )
@@ -293,10 +317,7 @@ class TelegramBotHandlers:
         await query.answer()
 
         if query.data == 'back':
-            teacher_id = context.user_data.get('teacher_id')
-            if teacher_id:
-                return await self.handle_teacher(update, context)
-            return await self.browse_notes(update, context)
+            return await self.start(update, context)
 
         try:
             rating_data = query.data.split('_')
@@ -436,15 +457,16 @@ class TelegramBotHandlers:
                         keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data='back')])
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         
+                        description_text = f"📋 توضیحات:\n{note.description}\n\n" if note.description else ""
                         info_text = (
-                            f"📝 *{note.name}*\n"
+                            f"*{note.name}*\n"
                             f"👨‍🏫 استاد: {note.teacher.name}\n"
                             f"📚 رشته: {note.teacher.lesson.semester.major.name}\n"
                             f"📅 نیمسال: {note.teacher.lesson.semester.name}\n"
                             f"📖 درس: {note.teacher.lesson.name}\n"
                             f"✍️ نویسنده: {note.author}\n"
-                            f"📅 تاریخ نگارش: {format_persian_date(note.date_written)}\n"
-                            f"{f'📋 توضیحات:\n{note.description}\n\n' if note.description else ''}"
+                            f"📅 تاریخ نگارش: {format_date(note.date_written)}\n"
+                            f"{description_text}"
                             f"⭐ امتیاز: {note.average_rating:.1f} ({note.rating_count} رأی)\n\n"
                             f"لطفاً به این جزوه امتیاز دهید:"
                         )
