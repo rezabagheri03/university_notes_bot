@@ -10,4 +10,12 @@ services:
       - key: FLASK_APP
         value: wsgi.py
       - key: FLASK_ENV
-        value: production 
+        value: production
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite:///app.db
+      - key: UPLOAD_FOLDER
+        value: /var/data/uploads 
